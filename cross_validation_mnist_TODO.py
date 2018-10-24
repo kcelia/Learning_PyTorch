@@ -9,6 +9,7 @@ import torch as T
 import torch.nn as nn
 
 from torch.nn.modules import *
+from torch.utils.data.dataset import Subset
 
 from tqdm import tqdm, trange
 from torchvision import datasets, transforms
@@ -16,7 +17,7 @@ from torchvision import datasets, transforms
 
 T.set_default_tensor_type('torch.FloatTensor')
 
-batch_size = 32
+batch_size = 8
 nb_epochs  = 5000
 nb_digits  = 10
 
@@ -37,50 +38,13 @@ test_loader = T.utils.data.DataLoader(datasets.MNIST(
     batch_size=batch_size, shuffle=True
 ) 
 
-"""
-
-def get_fold(datax, datay, fold_id, n_folds=3, seed=1996):
-    data = list(zip(datax, datay))
-    random.Random(seed).shuffle(data)
-    datax, datay = zip(*data)
-    fold_size = len(datax) // n_folds
-    return (
-        np.array(datax)[fold_id * fold_size:(fold_id + 1) * fold_size],
-        np.array(datay)[fold_id * fold_size:(fold_id + 1) * fold_size]
-    )
-
-def get_all_folds_except(datax, datay, fold_id, n_folds=3, seed=1996):
-    X = []
-    Y = []
-    for i in range(n_folds):
-        if fold_id != i:
-            t = get_fold(datax, datay, fold_id, n_folds=n_folds, seed=seed)
-            X.extend(list(t[0]))
-            Y.extend(list(t[1]))
-    return np.array(X), np.array(Y)
-
-train_data   = train_loader.dataset.train_data.detach().numpy()
-train_labels = train_loader.dataset.train_labels.detach().numpy()
-
-nb_folds = 3
-for i in range(nb_folds):
-    pass
-
-t, l = get_all_folds_except(train_data, train_labels, 2)
-
-train_dataset = T.utils.data.TensorDataset(T.tensor(t).float(), T.tensor(l))
-train_loader  = T.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True) 
-
-
-"""
-
 def save_checkpoint(state, is_best, filename='output/checkpoint.pth'):
     """Save checkpoint if a new best is achieved"""
     if is_best:
-        print ("=> Saving a new best")
+        #print ("=> Saving a new best")
         torch.save(state, filename)  # save checkpoint
     else:
-        print ("=> Validation Accuracy did not improve")
+        pass #print ("=> Validation Accuracy did not improve")
 
 
 class Net_CO(Module):
@@ -106,64 +70,117 @@ class Net_CO(Module):
         return self.clf(out)
 
 
-model = Net_CO()
-optimizer = torch.optim.Adam(model.parameters())
-loss_function = CrossEntropyLoss()
-
 ##inspecter le modele et verifier qu'il marche
 #from torchsummary import summary
 #summary(model, (1, 28, 28))
 
 
-dataset = torch.utils.data.ConcatDataset([train_loader, test_loader])
+# Pour avoir le meme chemin ( pour que les données soient 
+# dans train_loader.tensor (qui lui est un tuple, x0, y1)
+# premier split, init de base
+td = train_loader.dataset.train_data
+tl = train_loader.dataset.train_labels
+train_dataset = T.utils.data.dataset.TensorDataset(
+    td[:int(len(td) * .8)],
+    tl[:int(len(td) * .8)]
+)
+valid_dataset = T.utils.data.dataset.TensorDataset(
+    td[int(len(td) * .8):],
+    tl[int(len(td) * .8):]
+)
 
 
-nb_epochs = 7
-train_history, test_history = [], []
-for i in trange(nb_epochs):
-    model.train()
-    batch_loss = []
-    for x, y in train_loader:
-        optimizer.zero_grad()
-        yhat = model(x.view([x.shape[0], 1, 28, 28]))# 1: couleur
-        #pour les convolution batch_size, channel_in, w, h
-        #pour le linéaire Batch_size, nb_features
-        loss = loss_function(yhat, y)
-        loss.backward()
-        optimizer.step()
-        batch_loss.append(loss.item())
-    train_history.append(np.array(batch_loss).mean())
-    model.eval()# utile pour le dropout, pour ne pas stocker les gradientss
-    batch_loss = []
-    for x, y in test_loader:
-        yhat = model(x.view([x.shape[0], 1, 28, 28]))
-        loss = loss_function(yhat, y)
-        batch_loss.append(loss.item())
-    test_history.append(np.array(batch_loss).mean())
-    save_checkpoint({
-        'epoch': i,
-        'state_dict': model.state_dict(),
-        'current_loss': test_history[-1]
-    }, test_history[-1] < test_history[-2] if len(test_history) > 1 else True)
-
+def get_train_val(train_dataset, valid_dataset):
+    # pour recuperer les données
+    td = train_dataset.tensors[0]
+    tl = train_dataset.tensors[1]
+    vd = valid_dataset.tensors[0]
+    vl = valid_dataset.tensors[1]
+    train_data = T.cat((vd, td))
+    label_data = T.cat((vl, tl))
+    tr_ld = T.utils.data.dataset.TensorDataset(
+        train_data[:int(len(td) * .8)],
+        label_data[:int(len(td) * .8)]
+    )
+    vl_ld = T.utils.data.dataset.TensorDataset(
+        train_data[int(len(td) * .8):],
+        label_data[int(len(td) * .8):]
+    )
+    return tr_ld, vl_ld
         
 
+folds_accuracy = []
+for i in range(5): #5 folds
+    #on change le fold pour la cross val
+    train_dataset, valid_dataset = get_train_val(train_dataset, valid_dataset)
 
-plt.title("Loss MNIST")
-plt.plot(train_history, label='train')#, marker="o--")
-plt.plot(test_history, label='test')#, marker='r--') 
-plt.legend()
-plt.show()
+    #on cree les loader associes aux datasets (train/valid) sample ci-dessus
+    train_loader = T.utils.data.DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True
+    )
+
+    valid_loader = T.utils.data.DataLoader(
+        valid_dataset,
+        batch_size=batch_size,
+        shuffle=True
+    )
+
+    #reset model
+    model = Net_CO()
+    optimizer = torch.optim.Adam(model.parameters())
+    loss_function = CrossEntropyLoss()
+
+    #apprentissage classique
+    nb_epochs = 20
+    train_history, test_history = [], []
+    for i in trange(nb_epochs):
+        model.train()
+        batch_loss = []
+        for x, y in train_loader:
+            x = x.float()
+            optimizer.zero_grad()
+            yhat = model(x.view([x.shape[0], 1, 28, 28]))
+            loss = loss_function(yhat, y)
+            loss.backward()
+            optimizer.step()
+            batch_loss.append(loss.item())
+        train_history.append(np.array(batch_loss).mean())
+        model.eval()
+        batch_loss = []
+
+        for x, y in test_loader:
+            x = x.float()
+            yhat = model(x.view([x.shape[0], 1, 28, 28]))
+            loss = loss_function(yhat, y)
+            batch_loss.append(loss.item())
+        test_history.append(np.array(batch_loss).mean())
+        #saving checkpoints
+        save_checkpoint({
+            'epoch': i,
+            'state_dict': model.state_dict(),
+            'current_loss': test_history[-1]
+        }, test_history[-1] < test_history[-2] if len(test_history) > 1 else True)
+
+            
+
+    plt.title("Loss MNIST")
+    plt.plot(train_history, label='train')#, marker="o--")
+    plt.plot(test_history, label='test')#, marker='r--') 
+    plt.legend()
+    plt.show()
 
 
-accuracy = []
-for x, y in test_loader:
-    if x.shape[0] != batch_size:
-        continue
-    yhat = model(x.view([batch_size, 1, 28, 28]))
-    accuracy.append((yhat.argmax(1) == y).float().mean().item())
-print(np.mean(accuracy))
+    accuracy = []
+    for x, y in test_loader:
+        if x.shape[0] != batch_size:
+            continue
+        yhat = model(x.view([batch_size, 1, 28, 28]))
+        accuracy.append((yhat.argmax(1) == y).float().mean().item())
+    print("accuracy fold {} : {}".format(i, np.mean(accuracy)))
 
+    folds_accuracy.append(np.mean(accuracy))
 
-
+print('==> final accuracy :', np.mean(folds_accuracy))
 
