@@ -42,16 +42,27 @@ class CeliaNet(Module):
     def __init__(self):
         super(CeliaNet, self).__init__()
         self.conv = Sequential(
-            Conv2d(1, 5, 5),#channel de sortie = combien de filtre on applique, kernel size = taille du filtre 5= 5X5
+            #Conv2D => (channel_in, channel_out, kernel_size)
+            Conv2d(1, 5, 5),
+            #channel_out = Combien de filtre on veut appliquer
+            #kernel_size = kernel_w*kernel_h, ici = 5, avec kernel_w=kernel_h=5 
+            #nbr_filtre = channel_in, kernel_w*kernel_h
+            #nbr_param = (channel_in*kernel_w*kernel_h+1)*channel_out = (1*5*5+1)*5
             ReLU(),
             MaxPool2d(2),
+            #aucun parametre
             Conv2d(5, 16, 9),
+            #nbr_param = (channel_in*kernel_w*kernel_h+1)*channel_out = (5*9*9+1)*16
             ReLU(),
             Conv2d(16, 20, 4),
+            #nbr_param = (channel_in*kernel_w*kernel_h+1)*channel_out = (16*4*4+1)*20
             ReLU()
         )
         self.clf = Sequential(
-            Linear(20, 10), #20 la taille du vecteur flatten, sortie de la convolution
+            Linear(20, 10),
+            #channel_in, channel_out
+            #channel_in = 20 (la taille du vecteur flatten = sortie de la convolution)
+            #nbr_param = (channel_in+1)*channel_out
             Softmax()
         )
 
