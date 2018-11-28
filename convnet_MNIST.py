@@ -46,7 +46,7 @@ class CeliaNet(Module):
             Conv2d(1, 5, 5),
             #channel_out = Combien de filtre on veut appliquer
             #kernel_size = kernel_w*kernel_h, ici = 5, avec kernel_w=kernel_h=5 
-            #nbr_filtre = channel_in, kernel_w*kernel_h
+            #nbr_filtre = channel_out
             #nbr_param = (channel_in*kernel_w*kernel_h+1)*channel_out = (1*5*5+1)*5
             ReLU(),
             MaxPool2d(2),
